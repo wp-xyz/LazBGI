@@ -1,6 +1,8 @@
 # LazBGI
 Emulation of Turbo Pascal's BGI graphics commands for Lazarus
 
+![Screenshot](screenshots/bgidemo.png)
+
 ## Installation
 
 Simply copy the unit lazBGI.pas to the folder of your project.
