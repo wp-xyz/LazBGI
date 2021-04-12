@@ -1,0 +1,28 @@
+object MainForm: TMainForm
+  Left = 257
+  Height = 390
+  Top = 127
+  Width = 702
+  Caption = 'Simple demo'
+  ClientHeight = 390
+  ClientWidth = 702
+  LCLVersion = '2.1.0.0'
+  object PaintBox1: TPaintBox
+    Left = 8
+    Height = 346
+    Top = 7
+    Width = 686
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    OnPaint = PaintBox1Paint
+  end
+  object CloseBtn: TButton
+    Left = 619
+    Height = 25
+    Top = 360
+    Width = 75
+    Anchors = [akRight, akBottom]
+    Caption = 'Close'
+    OnClick = CloseBtnClick
+    TabOrder = 0
+  end
+end
