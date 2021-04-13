@@ -17,16 +17,21 @@ Simply copy the unit `lazBGI.pas` to the folder of your project.
   bottom/right corner has (`GetMaxX`, `GetMaxY`).
 
 - BGI commands must begin with `InitGraph()`. In contrast to BGI, the routine does
-  not provide the graphics driver, but the name of the control onto which the
-  output is painted, e.g. `Paintbox1` or `Form1`.
+  not provide the graphics driver, but the canvas onto which the output is 
+  painted, e.g. `Paintbox1` or `Form1`. The other two parameters define the width and
+  height of the drawing area:
 
+```pascal
+    InitGraph(Paintbox1.Canvas, Paintbox1.Width, Paintbox1.Height);
+```
+     
 - Then the rest of the BGI commands follow like in an original ancient DOS
   program, such as `Line()`, `OutText()`, `Circle()` etc.
 
 - `CloseGraph` at the end of the graphic output is no longer absolutely required
   any more since the system cannot be switched back to text mode.
   `CloseGraph`, however, cleans up memory usage - it will be called automatically
-  at the end of the program anyway.
+  at the end of the program nevertheless.
 
 - The graphics commands must be called from a routine of the painting cycle of
   the container control. In case of `TPaintBox`, `TPanel` or `TForm`, this is the
@@ -37,42 +42,51 @@ Simply copy the unit `lazBGI.pas` to the folder of your project.
 - In DOS, often the same function was painted over the same graphic with
   different parameters - this was possible because of the persistent screen
   memory. This is not possible any more because the OS can reqest a complete
-  repaint at any time and thus erase the previous drawing.
+  repaint at any time and thus erase the previous drawing. An exception is
+  painting into a temporary buffer bitmap - see below.
 
 - Also be prepared of surprises when random numbers are used for some drawing
   parameters, such as in Borland's BGIDEMO.
 
 - The BGI painting routine, by no means, must be allowed to wait for user input
   like in the original BGIDEMO. User input must be handled by the usual
-  LCL OnKey* and OnMouse* events outside the painting routine.
+  LCL `OnKey*` and `OnMouse*` events outside the painting routine.
 
 - If nevertheless several curves are to be painted above each other, or if
   a flicker-free animation is supposed to be shown then the BGI graphic can
   be buffered:
 
   - When the graph is supposed to be drawn upon a button click the drawing
-    commands must be put into the `OnClick` event handler of the button; the
-    last command must be `DrawToBuffer` which copies the graphic from the
-    screen into a buffer bitmap. It is also possible to call `DrawToBuffer` immediately after `InitGraph` which
-    requires to trigger repainting by calling `Paintbox1.Invalidate`.
+    commands must be put into the `OnClick` event handler of the button.
+    The canvas for painting must be the canvas of a temporary bitmap, and the
+    drawing routine must trigger a repaint of the control on which the BGI
+    graphic is supposed to appear (`Paintbox1.Invalidate`). In the `OnPaint`
+    handler of the control (`Paintbox`, `Panel`, `Form`, ...) the BGI graphic must
+    be copied from the bitmap buffer to the control canvas:            
 
 ```pascal
-procedure TForm1.Button1Click(Sender: TObject);
-begin
-  InitGraph(Paintbox1);
-  {... BGI graphics commands ... }
-  DrawToBuffer;
-end;
-```
+      var
+        Buffer: TBitmap;
 
-  - In the OnPaint handler of the Paintbox (Panel, Form, ...) the graphic must
-    be copied to the screen by calling ShowBuffer
+      procedure TForm1.Button1Click(Sender: TObject);
+      begin
+        FreeAndNil(Buffer);
+        Buffer := TBitmap.Create
+        InitGraph(Buffer.Canvas, Paintbox1.Width, Paintbox1.Height);
+        {... BGI graphics commands ... }
+        CloseGraph;
+        Paintbox1.Invalidate;
+      end;
 
-```pascal
-    procedure TForm1.Paintbox1Paint(Sender: TObject);
-    begin
-      ShowBuffer;
-    end;
+      procedure TForm1.Paintbox1Paint(Sender: TObject);
+      begin
+        Paintbox1.Canvas.Draw(0, 0, Buffer);
+      end;
+      
+      procedure TForm1.FormDestroy(Sender: TObject);
+      begin
+        FreeAndNil(Buffer);  // do not forget to free the buffer bitmap
+      end;
 ```
 
 ## Differences to BGI
