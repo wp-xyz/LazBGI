@@ -65,7 +65,7 @@ procedure TMainForm.PaintBox1Paint(Sender: TObject);
 const
   testString = 'This is a text.';
 begin
-  InitGraph(PaintBox1);
+  InitGraph(PaintBox1.Canvas, Paintbox1.Width, Paintbox1.Height);
 
   Line(0, 0, GetMaxX, GetMaxY);
   Line(GetMaxX, 0, 0, GetMaxY);
@@ -90,7 +90,7 @@ begin
 
   Line(-100,0, 100, 100);
 
-  SetFgColor(Lightcyan);
+  SetFgColor(LightCyan);
   SetFillStyle(XHatchFill, Lightred);
   Rectangle(350, 100, 400, 150);
   SetViewport(350, 100, 400, 150, ClipOn);
@@ -98,6 +98,7 @@ begin
   LineRel(100, 50);
   Line(100, 0, 0, 50);
 
+  SetFgColor(Yellow);
   SetTextJustify(CenterText, CenterText);
   SetTextStyle(DefaultFont, VertDir, 1);
   OutTextXY(3, 0, '123456789012345678901234567890');

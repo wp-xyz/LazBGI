@@ -9,21 +9,21 @@ procedure TextPlay;                     // 1
 procedure BarPlay;                      // 2
 procedure Bar3DPlay;                    // 3
 procedure RandBarPlay;                  // 4
-procedure CirclePlay(Buffered:boolean); // 5,6
-procedure TextDump(font:integer);       // 7..11
-procedure LineToPlay;                   // 12
-procedure LineRelPlay;                  // 13
-procedure LineStylePlay;                // 14
-procedure ColorPlay;                    // 15
-procedure PolyPlay(Buffered:boolean);   // 16,17
-procedure FillStylePlay;                // 18
-procedure FillPatternPlay;              // 19
-procedure PutPixelPlay;                 // 20
-procedure ArcPlay;                      // 21
-procedure FillEllipsePlay;              // 22
-procedure SectorPlay;                   // 23
-procedure WriteModePlay;                // 24
-procedure PiePlay;                      // 25
+procedure CirclePlay;                   // 5
+procedure TextDump(font:integer);       // 6..10
+procedure LineToPlay;                   // 11
+procedure LineRelPlay;                  // 12
+procedure LineStylePlay;                // 13
+procedure ColorPlay;                    // 14
+procedure PolyPlay;                     // 15
+procedure FillStylePlay;                // 16
+procedure FillPatternPlay;              // 17
+procedure PutPixelPlay;                 // 18
+procedure ArcPlay;                      // 19
+procedure FillEllipsePlay;              // 20
+procedure SectorPlay;                   // 21
+procedure WriteModePlay;                // 22
+procedure PiePlay;                      // 23
 
 // Additional demos
 procedure FloodFillPlay;                // 0
@@ -598,14 +598,12 @@ begin
   WaitToGo;
 end; { RandBarPlay }
 
-{ Draw random circles on the screen
-  Buffered: Test for buffered painting. }
-procedure CirclePlay(Buffered: boolean);
+{ Draw random circles on the screen }
+procedure CirclePlay;
 var
   MaxRadius: word;
   i: Integer;
 begin
-  if Buffered then DrawToBuffer;
   // LCL: Initialize the random number generator to get reproducible so that
   // the graph does not change with every repaint.
   RandSeed := 0;
@@ -619,9 +617,6 @@ begin
     Circle(Random(MaxX), Random(MaxY), Random(MaxRadius));
   end;
   WaitToGo;
-
-  // LCL: Buffered = Test for buffered drawing
-  if Buffered then ShowBuffer;
 end; { CirclePlay }
 
 { Dump the complete character sets to the screen }
@@ -905,9 +900,8 @@ begin
   WaitToGo;
 end; { ColorPlay }
 
-{ Draw random polygons with random fill styles on the screen
-  Buffered: demonstrate buffered painting }
-procedure PolyPlay(Buffered:Boolean);
+{ Draw random polygons with random fill styles on the screen }
+procedure PolyPlay;
 const
   MaxPts = 5;
 type
@@ -917,10 +911,9 @@ var
   I, Color : word;
   n : integer; // LCL
 begin
-  if Buffered then DrawToBuffer;
-  RandSeed := 0;
   // LCL: Initialize the random number generator so that all shapes look the same
   // with each redraw.
+  RandSeed := 0;
 
   MainWindow('FillPoly demonstration');
 //  StatusLine('Esc aborts or press a key...');  // LCL: No input allowed
@@ -940,8 +933,6 @@ begin
 // LCL: No input allowed in OnPaint event!
   end;
   WaitToGo;
-
-  if Buffered then ShowBuffer;  // LCL: Demonstrate buffered painting
 end; { PolyPlay }
 
 { Display all of the predefined fill styles available }

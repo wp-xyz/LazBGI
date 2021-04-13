@@ -13,8 +13,11 @@ Introduction:
   bottom/right corner has (GetMaxX, GetMaxY).
 
 - BGI commands must begin with "InitGraph". In contrast to BGI, the routine does
-  not provide the graphics driver, but the name of the control onto which the
-  output is painted, e.g. "Paintbox1" or "Form1".
+  not provide the graphics driver, but the canvas onto which the output is
+  painted, e.g. "Paintbox1" or "Form1". The other two parameters define the
+  with and height of the drawing area:
+
+    InitGraph(Paintbox1.Canvas, Paintbox1.Width, Paintbox1.Height);
 
 - Then the rest of the BGI commands follow like in an original ancient DOS
   program, such as "Line", "OutText", "Circle" etc.
@@ -33,7 +36,8 @@ Introduction:
 - In DOS, often the same function was painted over the same graphic with
   different parameters - this was possible because of the persistent screen
   memory. This is not possible any more because the OS can reqest a complete
-  repaint at any time and thus erase the previous drawing.
+  repaint at any time and thus erase the previous drawing. An exception is
+  painting into a temporary buffer bitmap - see below.
 
 - Also be prepared of surprises when random numbers are used for some drawing
   parameters, such as in Borland's BGIDEMO.
@@ -47,28 +51,30 @@ Introduction:
   be buffered:
 
   - When the graph is supposed to be drawn upon a button click the drawing
-    commands must be put into the OnClick event handler of the button; the
-    last command must be "DrawToBuffer" which copies the graphic from the
-    screen into a buffer bitmap.
+    commands must be put into the OnClick event handler of the button. The
+    canvas for painting must be the canvas of a temporary bitmap, and the
+    drawing routine must trigger a repaint of the control on which the BGI
+    graphic is supposed to appear (Paintbox1.Invalidate). In the OnPaint
+    handler of the control (Paintbox, Panel, Form, ...) the BGI graphic must
+    be copied from the bitmap buffer to the control canvas:
 
-    procedure TForm1.Button1Click(Sender: TObject);
-    begin
-      InitGraph(Paintbox1);
-      {... BGI graphics commands ... }
-      DrawToBuffer;
-    end;
+      var
+        Buffer: TBitmap;
 
-    It is also possible to call DrawToBuffer immediately after InitGraph which
-    requires to trigger repainting by calling Paintbox1.Invalidate.
+      procedure TForm1.Button1Click(Sender: TObject);
+      begin
+        FreeAndNil(Buffer);
+        Buffer := TBitmap.Create
+        InitGraph(Buffer.Canvas, Paintbox1.Width, Paintbox1.Height);
+        {... BGI graphics commands ... }
+        CloseGraph;
+        Paintbox1.Invalidate;
+      end;
 
-  - In the OnPaint handler of the Paintbox (Panel, Form, ...) the graphic must
-    be copied to the screen by calling ShowBuffer
-
-    procedure TForm1.Paintbox1Paint(Sender: TObject);
-    begin
-      ShowBuffer;
-    end;
-
+      procedure TForm1.Paintbox1Paint(Sender: TObject);
+      begin
+        Paintbox1.Canvas.Draw(0, 0, Buffer);
+      end;
 
 Differences to BGI:
 
@@ -287,6 +293,7 @@ procedure GetAspectRatio(out xasp, yasp: word);
 function GetBkColor: word;
 function GetColor: word;
 function GetDriverName: string;
+function GetFgColor: word;
 procedure GetFillSettings(out FillInfo: FillSettingsType);
 function GetGraphMode: integer;
 procedure GetImage(x1, y1, x2, y2: integer; ABitmap: TBitmap);
@@ -304,7 +311,7 @@ function GraphErrorMsg({%H-}AErrorCode: integer): string;
 function GraphResult: integer;
 procedure GetViewSettings(out ViewPort: ViewportType);
 function ImageSize({%H-}x1, {%H-}y1, {%H-}x2, {%H-}y2: integer): word;
-procedure InitGraph(AControl: TControl);  // NOTE: Parameters changed!
+procedure InitGraph(ACanvas: TCanvas; AWidth, AHeight: Integer);  // NOTE: Parameters changed!
 function InstallUserDriver({%H-}AName: string; {%H-}AutoDetectPtr: Pointer): integer;
 function InstallUserFont(AFontName: string; ASizes: array of integer; AStyle: TFontStyles): integer;  // NOTE: Parameters changed!
 procedure Line(x1, y1, x2, y2: Integer);
@@ -338,18 +345,16 @@ function  TextWidth(s: string): integer;
 { Additional declarations and routines }
 
 type
-  EGraphError = Exception;
-
-// Buffering
-procedure DrawToBuffer;
-procedure DrawToScreen;
-procedure ShowBuffer;
+  EBGIGraphError = Exception;
 
 // Colors
-function GetRGBBkColor : TColor;
-function GetRGBColor : TColor;
-procedure SetRGBBkColor(AColor:TColor);
-procedure SetRGBColor(AColor:TColor);
+function GetBkColorRGB : TColor;
+function GetColorRGB : TColor;
+procedure SetBkColorRGB(AColor: TColor);
+procedure SetColorRGB(AColor: TColor);
+
+function GetDefaultBkColorRGB: TColor;
+procedure SetDefaultBkColorRGB(AColor: TColor);
 
 // Fonts
 procedure GetTextFont(out AFontname: TFontName; out ASize: integer; out AStyle: TFontStyles);
@@ -364,10 +369,6 @@ procedure SetTextFont(AFontname: TFontName; ASize: integer; AStyle: TFontStyles)
 procedure GradientRect(x1, y1, x2, y2: Integer; StartColor, EndColor:TColor; ADirection: integer);
 procedure SetFillBitmap(ABitmap: TCustomBitmap);
 
-// Misc
-function GetCanvas: TCanvas;
-procedure SetBgiControl(AControl: TControl);
-
 
 implementation
 
@@ -375,29 +376,14 @@ uses
   Math,
   Forms;
   
-{ Interfacing to LCL controls
-
-  Not every TGraphicControl has a public Canvas property. In these cases,
-  type-casting to TBgiXXXControl gives access to the Canvas.}
-type
-  // for TPaintbox
-  TBgiGraphicControl = class(TGraphicControl)
-  end;
-
-  // for TPanel
-  TBgiCustomControl = class(TCustomControl)
-  end;
-
 var
-  _Canvas : TCanvas;           // Canvas on which painting occurs
-  _ActiveCanvas : TCanvas;     // Current canvas, control or buffer bitmap
-  _BgiBuffer : TBitmap;        // Buffer bitmap
-  _IsBuffered : boolean;       // Painting is buffered
-  _CanvasRect : TRect;         // Size of canvas on the BGI control
-  _ClipOrigin : TPoint;        // Origin of the canvas on the BGI control
-  _ArcCoords : ArcCoordsType;  // Coordinates for "Arc"
-  _Viewport : ViewportType;    // Current viewport
+  FCanvas: TCanvas;           // Canvas as BGI screen replacement
+  FCanvasWidth: Integer;      // Width of the area reserved on the canvas for BGI painting
+  FCanvasHeight: Integer;     // Height of the area reserved on the canvas for BGI painting
+  FActiveCanvas: TCanvas;     // Canvas used for painting
 
+  FViewPort: ViewportType;    // Current viewport in BGI units
+  FArcCoords: ArcCoordsType;  // Coordinates needed by "Arc()"
 
 { Font management }
 
@@ -411,48 +397,46 @@ type
   TFontArray = array[DefaultFont..10] of TFontRec;
 
 var
-  _Fonts : TFontArray;         // Array with max 10(+1) BGI fonts
-  _NumFonts : integer;         // Count of available fonts in array _Fonts
-  _FontName : string;          // Currently used font
-  _FontSize : integer;         // Point size of the currently used font
-  _FontStyle : TFontStyles;    // Style attributes of the currently used font
-  _BgiFont : integer;          // Current font as BGI number
-  _BgiSize : integer;          // BGI size of the current font
-  _TextAlignHor : integer;     // Current alignment: LeftText...
-  _TextAlignVert : integer;    // ... TopText...
-  _TextDir : integer;          // Current writing direction (HorizDir...)
-
+  FFonts : TFontArray;         // Array with max 10(+1) BGI fonts
+  FNumFonts : integer;         // Count of available fonts in array _Fonts
+  FFontName : string;          // Currently used font
+  FFontSize : integer;         // Point size of the currently used font
+  FFontStyle : TFontStyles;    // Style attributes of the currently used font
+  FBgiFont : integer;          // Current font as BGI number
+  FBgiSize : integer;          // BGI size of the current font
+  FTextAlignHor : integer;     // Current alignment: LeftText...
+  FTextAlignVert : integer;    // ... TopText...
+  FTextDir : integer;          // Current writing direction (HorizDir...)
 
 { Area fills
-  There are no LCL brushes which exactly correspond to the BGI fills. Therefore,
-  the fill patterns are created manually. }
+  There are no LCL brushes which exactly correspond to the BGI fills.
+  Therefore, the fill patterns are created manually. }
 const
-  Empty_Fill     : FillpatternType = ($00,$00,$00,$00,$00,$00,$00,$00);
-  Solid_Fill     : FillPatternType = ($FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF);
-  Line_Fill      : FillpatternType = ($FF,$FF,$00,$00,$FF,$FF,$00,$00);
-  Lt_Slash_Fill  : FillPatternType = ($01,$02,$04,$08,$10,$20,$40,$80);
-  Slash_Fill     : FillPatternType = ($E0,$C1,$83,$07,$0E,$1C,$38,$70);
-  Backslash_Fill : FillPatternType = ($F0,$78,$3C,$1E,$0F,$87,$C3,$E1);
-  Lt_Bkslash_Fill: FillPatternType = ($80,$40,$20,$10,$08,$04,$02,$01);
-  Hatch_Fill     : FillPatternType = ($FF,$88,$88,$88,$FF,$88,$88,$88);
-  XHatch_Fill    : FillPatternType = ($81,$42,$24,$18,$18,$24,$42,$81);
-  Interleave_Fill: FillPatternType = ($F0,$00,$00,$00,$0F,$00,$00,$00);
-  Wide_Dot_Fill  : FillPatternType = ($80,$00,$08,$00,$80,$00,$08,$00);
-  Close_Dot_Fill : FillPatternType = ($88,$00,$22,$00,$88,$00,$22,$00);
+  Empty_Fill     : FillPatternType = ($00, $00, $00, $00, $00, $00, $00, $00);
+  Solid_Fill     : FillPatternType = ($FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF);
+  Line_Fill      : FillPatternType = ($FF, $FF, $00, $00, $FF, $FF, $00, $00);
+  Lt_Slash_Fill  : FillPatternType = ($01, $02, $04, $08, $10, $20, $40, $80);
+  Slash_Fill     : FillPatternType = ($E0, $C1, $83, $07, $0E, $1C, $38, $70);
+  Backslash_Fill : FillPatternType = ($F0, $78, $3C, $1E, $0F, $87, $C3, $E1);
+  Lt_Bkslash_Fill: FillPatternType = ($80, $40, $20, $10, $08, $04, $02, $01);
+  Hatch_Fill     : FillPatternType = ($FF, $88, $88, $88, $FF, $88, $88, $88);
+  XHatch_Fill    : FillPatternType = ($81, $42, $24, $18, $18, $24, $42, $81);
+  Interleave_Fill: FillPatternType = ($F0, $00, $00, $00, $0F, $00, $00, $00);
+  Wide_Dot_Fill  : FillPatternType = ($80, $00, $08, $00, $80, $00, $08, $00);
+  Close_Dot_Fill : FillPatternType = ($88, $00, $22, $00, $88, $00, $22, $00);
 
 var
-  User_Fill      : FillPatternType = ($00,$00,$00,$00,$00,$00,$00,$00);
+  User_Fill      : FillPatternType = ($00, $00, $00, $00, $00, $00, $00, $00);
 
 const
-  _FillPatterns : Array[EmptyFill..UserFill] of ^FillPatternType =
+  FILL_PATTERNS: Array[EmptyFill..UserFill] of ^FillPatternType =
     (@Empty_Fill, @Solid_Fill, @Line_Fill, @Lt_Slash_Fill, @Slash_Fill,
      @BackSlash_Fill, @Lt_BkSlash_Fill, @Hatch_Fill, @XHatch_Fill,
      @InterLeave_Fill, @Wide_Dot_Fill, @Close_Dot_Fill, @User_Fill);
 
 var
-  _FillSettings : FillSettingsType;  // Current fill settings
-  _FillBitmap : TBitmap;             // Bitmap for area fills
-
+  FFillSettings: FillSettingsType;  // Current fill settings
+  FFillBitmap: TBitmap;             // Bitmap for area fills
 
 { Color management
   The VGA color of the BGI do not correspond exactly to LCL TColors. The
@@ -484,9 +468,10 @@ const
     _LightCyan, _LightRed, _LightMagenta, _Yellow, _White);
 
 var
-  _RGB_Color : TColor;           // Painting forground color as RGB
-  _RGB_BkColor : TColor;         // Background color as RGB
-
+  FBkColorRGB: TColor;        // Background color as RGB
+  FFgColorRGB: TColor;        // Text and line color as TGB
+  FDefaultBkColorRGB: TColor; // Default background color, used by GraphDefaults
+  FDefaultColorRGB: TColor;   // Default text/line color, used by GraphDefaults
 
 { Strings for error messages }
 
@@ -502,61 +487,67 @@ resourcestring
                               Local routines
 ===============================================================================}
 
-{ Checks whether "SegBgiControl has been called as first procedure and
+{ Checks whether a canvas has been assigned for painting and
   raises an exception otherwise. }
 procedure CheckCanvas;
 begin
-  if not Assigned(_Canvas)
-    then raise EGraphError.Create(SNoCanvas);
-  if _IsBuffered
-    then _ActiveCanvas := _BgiBuffer.Canvas
-    else _ActiveCanvas := _Canvas;
+  if not Assigned(FCanvas) then
+    raise EBGIGraphError.Create(SNoCanvas);
+
+  if not Assigned(FActiveCanvas) then
+    raise EBGIGraphError.Create(SNoCanvas);
 end;
 
 { Checks whether the provided bitmap has been created and raises an
   exception otherwise. }
-procedure CheckBitmap(ABitmap: TBitmap);
+procedure CheckBitmap(ABitmap: TCustomBitmap);
 begin
   if not Assigned(ABitmap) then
-    raise EGraphError.Create(SNoBitmap);
+    raise EBGIGraphError.Create(SNoBitmap);
 end;
 
 { Raises an exception for important BGI functions which are not implemented. }
 procedure NotImplementedError;
 begin
-  raise EGraphError.Create(SNotImplemented);
+  raise EBGIGraphError.Create(SNotImplemented);
 end;
 
 { Raises an exception when the font to be used is not valid. }
 procedure InvalidFontError;
 begin
-  raise EGraphError.Create(SInvalidFont);
+  raise EBGIGraphError.Create(SInvalidFont);
 end;
 
 { Raises an exception when then fill pattern to be used is not valid }
 procedure InvalidPatternError;
 begin
-  raise EGraphError.Create(SInvalidPattern);
+  raise EBGIGraphError.Create(SInvalidPattern);
+end;
+
+{ Return the canvas used for painting }
+function GetActiveCanvas: TCanvas;
+begin
+  Result := FCanvas;
 end;
 
 { Transforms the global point (x,y) (global with respect to GetMaxX and GetMaxY)
   to the local coordinate system defined by the currenly set viewport. }
 procedure LocalPoint(var x,y: Integer);
 begin
-  x := x - _ViewPort.x1;
-  y := y - _ViewPort.y1;
+  x := x - FViewPort.x1;
+  y := y - FViewPort.y1;
 end;
 
 { Transforms the point (x, y) from the local viewport coordinate system to
   "global" coordinates of the painting area (GetMaxX, GetMaxY). }
-procedure GlobalPoint(var x,y: Integer);
+procedure GlobalPoint(var x, y: Integer);
 begin
-  x := _ViewPort.x1 + x;
-  y := _ViewPort.y1 + y;
+  x := FViewPort.x1 + x;
+  y := FViewPort.y1 + y;
 end;
 
 { Exchanges the integers x and y }
-procedure Swap(var x,y: Integer);
+procedure Swap(var x, y: Integer);
 var
   tmp : integer;
 begin
@@ -566,7 +557,7 @@ begin
 end;
 
 { Makes sure that x1 < x2 and y1 < y2 }
-procedure CheckCorners(var x1,y1,x2,y2:integer);
+procedure CheckCorners(var x1, y1, x2, y2: integer);
 begin
   if x2 < x1 then Swap(x1, x2);
   if y2 < y1 then Swap(y1, y2);
@@ -588,15 +579,18 @@ end;
 
 procedure UseAsBkColor(AColor: TColor);
 begin
-  _RGB_BkColor := AColor;
-  _ActiveCanvas.Brush.Color := AColor;
+  FBkColorRGB := AColor;
+  if Assigned(FActiveCanvas) then
+    FActiveCanvas.Brush.Color := AColor;
 end;
 
-procedure UseAsColor(AColor: TColor);
+procedure UseAsFgColor(AColor: TColor);
 begin
-  with _ActiveCanvas do begin
-    Pen.Color := AColor;
-    Font.Color := AColor;
+  FFgColorRGB := AColor;
+  if Assigned(FActiveCanvas) then
+  begin
+    FActiveCanvas.Pen.Color := AColor;
+    FActiveCanvas.Font.Color := AColor;
   end;
 end;
 
@@ -639,9 +633,9 @@ end;
 procedure SetFontParams(id: integer; AName: string; ASizes: TFontSizeArray;
   AStyle: TFontStyles);
 begin
-  _Fonts[id].Name := AName;
-  Move(ASizes, _Fonts[id].Sizes, SizeOf(ASizes));
-  _Fonts[id].Style := AStyle;
+  FFonts[id].Name := AName;
+  Move(ASizes, FFonts[id].Sizes, SizeOf(ASizes));
+  FFonts[id].Style := AStyle;
 end;
 
 { Initializes the _Fonts array }
@@ -654,9 +648,9 @@ begin
   SetSansserifFont('Arial', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
   SetSmallFont('Arial Narrow', [6, 7, 8, 10, 12, 14, 16, 20, 24, 32], []);
   SetTriplexFont('Times New Roman', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
-  _NumFonts := 4;
-  for i:=_NumFonts+1 to 10 do begin
-    with _Fonts[i] do begin
+  FNumFonts := 4;
+  for i := FNumFonts+1 to 10 do begin
+    with FFonts[i] do begin
       Name := '';
       Style := [];
     end;
@@ -672,11 +666,13 @@ end;
 procedure Arc(x,y:integer; StAngle,EndAngle,Radius:word);
 var
   x1,y1, x2,y2, x3,y3, x4,y4 : integer;
-  phi : double;
+  sinPhi, cosPhi: Double;
 begin
   CheckCanvas;
-  _ArcCoords.x := x;
-  _ArcCoords.y := y;
+
+  FArcCoords.x := x;
+  FArcCoords.y := y;
+
   x1 := x - Radius;
   y1 := y - Radius;
   GlobalPoint(x1,y1);
@@ -685,26 +681,26 @@ begin
   y2 := y + Radius;
   GlobalPoint(x2,y2);
 
-  phi := degToRad(StAngle);
-  x3 := x + Round(Radius*cos(phi));
-  y3 := y - round(Radius*sin(phi));
-  _ArcCoords.XStart := x3;
-  _ArcCoords.YStart := y3;
+  SinCos(DegToRad(StAngle), sinPhi, cosPhi);
+  x3 := x + Round(Radius * cosphi);
+  y3 := y - round(Radius * sinphi);
+  FArcCoords.XStart := x3;
+  FArcCoords.YStart := y3;
   GlobalPoint(x3,y3);
 
-  phi := DegToRad(EndAngle);
-  x4 := x + round(Radius*cos(phi));
-  y4 := y - round(Radius*sin(phi));
-  _ArcCoords.XEnd := x4;
-  _ArcCoords.YEnd := y4;
+  SinCos(DegToRad(EndAngle), sinPhi, cosPhi);
+  x4 := x + round(Radius * cosphi);
+  y4 := y - round(Radius * sinphi);
+  FArcCoords.XEnd := x4;
+  FArcCoords.YEnd := y4;
   GlobalPoint(x4, y4);
 
-  _ActiveCanvas.Arc(x1,y1, x2,y2, x3,y3, x4,y4);
+  FActiveCanvas.Arc(x1,y1, x2,y2, x3,y3, x4,y4);
 end;
 
 procedure Bar(x1,y1,x2,y2:integer);
 var
-  penstyle : TPenStyle;
+  savedPenStyle : TPenStyle;
 begin
   CheckCanvas;
   inc(x2);  // LCL ignores the right/bottom corner
@@ -712,11 +708,14 @@ begin
   GlobalPoint(x1,y1);
   GlobalPoint(x2,y2);
   CheckCorners(x1,y1, x2,y2);
-  with _ActiveCanvas do begin
-    penstyle := Pen.Style;
-    Pen.Style := psClear;
-    Rectangle(x1, y1, x2, y2);
-    Pen.Style := penstyle;
+  with FActiveCanvas do begin
+    savedPenStyle := Pen.Style;
+    try
+      Pen.Style := psClear;
+      Rectangle(x1, y1, x2, y2);
+    finally
+      Pen.Style := savedPenStyle;
+    end;
   end;
 end;
 
@@ -730,7 +729,7 @@ end;
   The border outlines are painted in the current forground pen color (SetColor). }
 procedure Bar3D(x1, y1, x2, y2:integer; ADepth: word; ATop: boolean);
 var
-  fs: FillSettingsType;
+  savedFillSettings: FillSettingsType;
 begin
   CheckCanvas;
   inc(x2);  // LCL ignores the right/bottom edge
@@ -738,62 +737,66 @@ begin
   GlobalPoint(x1,y1);
   GlobalPoint(x2,y2);
   CheckCorners(x1,y1,x2,y2);
-  GetFillSettings(fs);
-  with _FillSettings do
-    SetFillStyle(Pattern, Color);
-  with _ActiveCanvas do
-  begin
-    Rectangle(x1,y1,x2,y2);
-    Brush.Style := bsSolid;
-    Brush.Color := _Rgb_BkColor;
-    Polygon([
-      Point(x2, y1),
-      Point(x2 + ADepth, y1 - ADepth),
-      Point(x2 + ADepth, y2 - ADepth),
-      Point(x2, y2),
-      Point(x2, y1)
-      ]);
-    if ATop then Polygon([
-      Point(x1, y1),
-      Point(x1 + ADepth, y1 - ADepth),
-      Point(x2 + ADepth, y1 - ADepth),
-      Point(x2, y1),
-      Point(x1, y1)
-      ]);
+
+  GetFillSettings(savedFillSettings);
+  try
+    with FFillSettings do
+      SetFillStyle(Pattern, Color);
+    with FActiveCanvas do
+    begin
+      Rectangle(x1,y1,x2,y2);
+      Brush.Style := bsSolid;
+      Brush.Color := FBkColorRGB;
+      Polygon([
+        Point(x2, y1),
+        Point(x2 + ADepth, y1 - ADepth),
+        Point(x2 + ADepth, y2 - ADepth),
+        Point(x2, y2),
+        Point(x2, y1)
+        ]);
+      if ATop then Polygon([
+        Point(x1, y1),
+        Point(x1 + ADepth, y1 - ADepth),
+        Point(x2 + ADepth, y1 - ADepth),
+        Point(x2, y1),
+        Point(x1, y1)
+        ]);
+    end;
+  finally
+    SetFillStyle(savedFillSettings.Pattern, savedFillSettings.Color);
   end;
-  SetFillStyle(fs.Pattern, fs.Color);
 end;
 
 procedure Circle(x, y, r: integer);
 var
-  brushstyle: TBrushStyle;
+  savedBrushStyle: TBrushStyle;
 begin
   CheckCanvas;
-  with _ActiveCanvas do begin
-    brushStyle := Brush.Style;
+  with FActiveCanvas do begin
+    savedBrushStyle := Brush.Style;
     try
       GlobalPoint(x,y);
       Brush.Style := bsClear;
       Ellipse(x-r, y-r, x+r, y+r);
     finally
-      Brush.Style := brushStyle;
+      Brush.Style := savedBrushStyle;
     end;
   end;
 end;
 
 procedure ClearDevice;
 var
-  brushstyle: TBrushStyle;
+  savedBrushStyle: TBrushStyle;
 begin
   CheckCanvas;
-  with _ActiveCanvas do begin
-    brushstyle := Brush.Style;
+  with FActiveCanvas do begin
+    savedBrushStyle := Brush.Style;
     try
       Brush.Style := bsSolid;
-      Brush.Color := _RGB_BkColor;
-      FillRect(_CanvasRect);
+      Brush.Color := FBkColorRGB;
+      FillRect(0, 0, FCanvasWidth, FCanvasHeight);
     finally
-      Brush.Style := brushstyle;
+      Brush.Style := savedBrushStyle;
     end;
   end;
 end;
@@ -801,8 +804,7 @@ end;
 { Cleans up memory }
 procedure CloseGraph;
 begin
-  FreeAndNil(_FillBitmap);
-  FreeAndNil(_BgiBuffer);
+  FreeAndNil(FFillBitmap);
 end;
 
 { Warning in case of self-enclosing polygons: In contrast to the BGI, the LCL
@@ -822,26 +824,28 @@ begin
   begin
     GlobalPoint(P^.x, P^.y);
     inc(P);
-//    PtrInt(P) := PtrInt(P) + SizeOf(PointType);
     dec(i);
   end;
-  PolyLine(_ActiveCanvas.Handle, @PPoint(PolyPoints), NumPoints);
+  FActiveCanvas.Polyline(@PolyPoints, NumPoints);
 end;
 
 procedure Ellipse(x, y: integer; StAngle, EndAngle, xRadius, yRadius:word);
 var
   x1,y1, x2,y2, x3,y3, x4,y4: integer;
   cosphi, sinphi: double;
-  brushstyle: TBrushStyle;
+  savedBrushStyle: TBrushStyle;
 begin
   CheckCanvas;
   if (StAngle = 0) and (EndAngle = 360) then
   begin
-    brushStyle := _ActiveCanvas.Brush.Style;
-    _ActiveCanvas.Brush.Style := bsClear;
-    GlobalPoint(x, y);
-    _ActiveCanvas.Ellipse(x-xRadius, y-yRadius, x+xRadius, y+yRadius);
-    _ActiveCanvas.Brush.Style := brushStyle;
+    savedBrushStyle := FActiveCanvas.Brush.Style;
+    try
+      FActiveCanvas.Brush.Style := bsClear;
+      GlobalPoint(x, y);
+      FActiveCanvas.Ellipse(x-xRadius, y-yRadius, x+xRadius, y+yRadius);
+    finally
+      FActiveCanvas.Brush.Style := savedBrushStyle;
+    end;
   end else
   begin
     x1 := x - xRadius;
@@ -862,7 +866,7 @@ begin
     y4 := y - round(yRadius * sinPhi);
     GlobalPoint(x4, y4);
 
-    _ActiveCanvas.Arc(x1,y1, x2,y2, x3,y3, x4, y4);
+    FActiveCanvas.Arc(x1,y1, x2,y2, x3,y3, x4, y4);
   end;
 end;
 
@@ -870,7 +874,7 @@ procedure FillEllipse(x, y: integer; xRadius, yRadius: word);
 begin
   CheckCanvas;
   GlobalPoint(x, y);
-  _ActiveCanvas.Ellipse(x - xRadius, y - yRadius, x + xRadius, y + yRadius);
+  FActiveCanvas.Ellipse(x - xRadius, y - yRadius, x + xRadius, y + yRadius);
 end;
 
 { Warning in case of self-enclosing polygons: In contrast to the BGI, the LCL
@@ -891,7 +895,7 @@ begin
     inc(P);
     dec(i);
   end;
-  _ActiveCanvas.Polygon(@PolyPoints, NumPoints);
+  FActiveCanvas.Polygon(@PolyPoints, NumPoints);
 end;
 
 { Like BGI: Starting at (x, y), fills all pixels until color "ABorder" is found. }
@@ -899,14 +903,14 @@ procedure FloodFill(x, y: integer; ABorder: word);
 begin
   CheckCanvas;
   GlobalPoint(x, y);
-  _ActiveCanvas.FloodFill(x, y, PaletteToColor(ABorder), fsBorder);
+  FActiveCanvas.FloodFill(x, y, PaletteToColor(ABorder), fsBorder);
   // Remark:
   // Using "fsSurface" it would be possible to fill all pixels of the specific color.
 end;
 
 procedure GetArcCoords(out ArcCoords: ArcCoordsType);
 begin
-  ArcCoords := _ArcCoords;
+  ArcCoords := FArcCoords;
 end;
 
 { Usually the pixels should be square. }
@@ -919,13 +923,19 @@ end;
 function GetBkColor: word;
 begin
   CheckCanvas;
-  Result := ColorToPalette(_ActiveCanvas.Brush.Color);
+  Result := ColorToPalette(FActiveCanvas.Brush.Color);
 end;
 
 function GetColor: word;
 begin
   CheckCanvas;
-  Result := ColorToPalette(_ActiveCanvas.Pen.Color);
+  Result := ColorToPalette(FActiveCanvas.Pen.Color);
+end;
+
+function GetFgColor: word;
+begin
+  CheckCanvas;
+  Result := ColorToPalette(FActiveCanvas.Pen.Color);
 end;
 
 { Just for compatibility. There is no BGI driver any more... }
@@ -936,8 +946,7 @@ end;
 
 procedure GetFillSettings(out FillInfo: FillSettingsType);
 begin
-  CheckCanvas;
-  FillInfo := _FillSettings;
+  FillInfo := FFillSettings;
 end;
 
 { Just for compatibility. There is not graphics mode any more... }
@@ -950,9 +959,9 @@ end;
 procedure GetLineSettings(out LineInfo: LineSettingsType);
 begin
   CheckCanvas;
-  LineInfo.LineStyle := BgiLinestyle(_ActiveCanvas.Pen.Style);
+  LineInfo.LineStyle := BgiLinestyle(FActiveCanvas.Pen.Style);
   LineInfo.Pattern := 0;
-  LineInfo.Thickness := _ActiveCanvas.Pen.Width;
+  LineInfo.Thickness := FActiveCanvas.Pen.Width;
 end;
 
 { Only 16 VGA colors! More colors can be created by SetRGBColor }
@@ -962,16 +971,16 @@ begin
 end;
 
 { Similar to BGI, but now the size of the drawing area is not defined by the
-  monitor but by the size of the GraphicControl defined by SetBGIControl. }
+  monitor but by the size of the rectangle specified in the InitGraph call. }
 function GetMaxX: integer;
 begin
-  with _CanvasRect do Result := Right - Left;
+  Result := FCanvasWidth;
 end;
 
 { See also GetMaxX }
 function GetMaxY: integer;
 begin
-  with _CanvasRect do result := Bottom - Top;
+  Result := FCanvasHeight;
 end;
 
 { Just for compatibility - there is no graph mode any more... }
@@ -984,25 +993,25 @@ function GetPixel(x,y: integer): word;
 begin
   CheckCanvas;
   GlobalPoint(x, y);
-  result := ColorToPalette(_ActiveCanvas.Pixels[x,y]);
+  result := ColorToPalette(FActiveCanvas.Pixels[x,y]);
 end;
 
 procedure GetTextSettings(out TextInfo: TextSettingsType);
 begin
   CheckCanvas;
-  TextInfo.Font := _BgiFont;
-  TextInfo.Direction := _TextDir;
-  TextInfo.CharSize := _BgiSize;
-  TextInfo.Horiz := _TextAlignHor;
-  TextInfo.Vert := _TextAlignVert;
+  TextInfo.Font := FBgiFont;
+  TextInfo.Direction := FTextDir;
+  TextInfo.CharSize := FBgiSize;
+  TextInfo.Horiz := FTextAlignHor;
+  TextInfo.Vert := FTextAlignVert;
 end;
 
 procedure GraphDefaults;
 begin
   CheckCanvas;
   SetViewPort(0, 0, GetMaxX, GetMaxY, ClipOn);
-  UseAsBkColor(_RGB_BkColor);
-  UseAsColor(_RGB_Color);
+  UseAsBkColor(FDefaultBkColorRGB);
+  UseAsFgColor(FDefaultColorRGB);
   SetTextStyle(DefaultFont, HorizDir, 1);
   SetTextJustify(LeftText, TopText);
   SetWriteMode(CopyPut);
@@ -1014,7 +1023,7 @@ end;
 { Is ignored. }
 function GraphErrorMsg(AErrorCode: integer): string;
 begin
-  result := '';
+  Result := '';
 end;
 
 { Unlike BGI, the destination of GetImage is not a pointer any more but a
@@ -1022,7 +1031,7 @@ end;
     ABitmap := TBitmap.Create;
   and which must be destroyed when no longer needed.
     ABitmap.Free; }
-procedure GetImage(x1, y1, x2, y2:integer; ABitmap: TBitmap);
+procedure GetImage(x1, y1, x2, y2: integer; ABitmap: TBitmap);
 var
   Rs, Rd : TRect;
 begin
@@ -1036,7 +1045,7 @@ begin
   with ABitmap do begin
     Width := x2-x1;
     Height := y2-y1;
-    Canvas.CopyRect(Rd, _ActiveCanvas, Rs);
+    Canvas.CopyRect(Rd, FActiveCanvas, Rs);
   end;
 end;
 
@@ -1048,19 +1057,19 @@ end;
 
 procedure GetViewSettings(out ViewPort: ViewportType);
 begin
-  ViewPort := _ViewPort;
+  ViewPort := FViewPort;
 end;
 
 function GetX: integer;
 begin
   CheckCanvas;
-  GetX := _ActiveCanvas.PenPos.X - _ViewPort.x1;
+  Result := FActiveCanvas.PenPos.X - FViewPort.x1;
 end;
 
 function GetY: integer;
 begin
   CheckCanvas;
-  GetY := _ActiveCanvas.PenPos.Y - _ViewPort.y1;
+  Result := FActiveCanvas.PenPos.Y - FViewPort.y1;
 end;
 
 { Because GetImage/PutImage use TBitmap objects here rather than pointer
@@ -1079,12 +1088,19 @@ end;
   - TForm.
   Does all initializations by calling GraphDefaults.
   InitGraph MUST BE CALLED BEFORE ANY OTHER CALLS of lazGraph. }
-procedure InitGraph(AControl:TControl);
+procedure InitGraph(ACanvas: TCanvas; AWidth, AHeight: Integer);
 begin
-  SetBgiControl(AControl);
-  if Assigned(_Canvas) then
-    GraphDefaults;
-  _IsBuffered := false;
+  FCanvas := ACanvas;
+  FCanvasWidth := AWidth;
+  FCanvasHeight := AHeight;
+  if FCanvas = nil then
+    raise EBGIGraphError.Create('[InitGraph] No canvas specified.');
+  if FCanvasWidth <= 1 then
+    raise EBGIGraphError.Create('[InitGraph] Invalid canvas width.');
+  if FCanvasHeight <= 1 then
+    raise EBGIGraphError.Create('[InitGraph] Invalid canvas height.');
+  FActiveCanvas := ACanvas;
+  GraphDefaults;
 end;
 
 { Not implemented. Calling this raises an exception because of the fundamental
@@ -1099,45 +1115,46 @@ end;
 function InstallUserFont(AFontName: string; ASizes: array of integer;
   AStyle: TFontStyles): integer;
 begin
-  inc(_NumFonts);
-  _Fonts[_NumFonts].Name := AFontName;
-  Move(_Fonts[_NumFonts-1].Sizes, _Fonts[_NumFonts].Sizes, SizeOf(TFontSizeArray));
-  _Fonts[_NumFonts].Style := AStyle;
-  _Fonts[_NumFonts].Sizes := ASizes;
-  Result := _NumFonts;
+  inc(FNumFonts);
+  FFonts[FNumFonts].Name := AFontName;
+  Move(FFonts[FNumFonts-1].Sizes, FFonts[FNumFonts].Sizes, SizeOf(TFontSizeArray));
+  FFonts[FNumFonts].Style := AStyle;
+  FFonts[FNumFonts].Sizes := ASizes;
+  Result := FNumFonts;
 end;
 
 procedure Line(x1, y1, x2, y2: integer);
 begin
   CheckCanvas;
   GlobalPoint(x1, y1);
-  _ActiveCanvas.MoveTo(x1, y1);
+  FActiveCanvas.MoveTo(x1, y1);
   GlobalPoint(x2, y2);
-  _ActiveCanvas.LineTo(x2, y2);
+  FActiveCanvas.LineTo(x2, y2);
 end;
 
 procedure LineRel(dx, dy: integer);
 begin
   CheckCanvas;
-  with _ActiveCanvas do LineTo(PenPos.X+dx, PenPos.Y+dy);
+  with FActiveCanvas do
+    LineTo(PenPos.X + dx, PenPos.Y + dy);
 end;
 
 procedure LineTo(x, y: integer);
 begin
   CheckCanvas;
-  _ActiveCanvas.LineTo(x+_Viewport.x1, y+_Viewport.y1);
+  FActiveCanvas.LineTo(x + FViewport.x1, y + FViewport.y1);
 end;
 
 procedure MoveTo(x, y: integer);
 begin
   CheckCanvas;
-  _ActiveCanvas.MoveTo(x+_Viewport.x1, y+_Viewport.y1);
+  FActiveCanvas.MoveTo(x + FViewport.x1, y + FViewport.y1);
 end;
 
 procedure MoveRel(dx, dy: integer);
 begin
   CheckCanvas;
-  with _ActiveCanvas do MoveTo(PenPos.X+dx, PenPos.Y+dy);
+  with FActiveCanvas do MoveTo(PenPos.X + dx, PenPos.Y + dy);
 end;
 
 procedure OutText(s: string);
@@ -1145,99 +1162,81 @@ var
   w : integer;
 begin
   CheckCanvas;
-  OutTextXY(_ActiveCanvas.PenPos.X, _ActiveCanvas.PenPos.Y, s);
+  OutTextXY(FActiveCanvas.PenPos.X, FActiveCanvas.PenPos.Y, s);
   w := TextWidth(s);
-  case _TextDir of
+  case FTextDir of
     HorizDir :
-      with _ActiveCanvas do MoveTo(PenPos.X+w, PenPos.Y);
+      with FActiveCanvas do MoveTo(PenPos.X + w, PenPos.Y);
     VertDir :
-      with _ActiveCanvas do MoveTo(PenPos.X, PenPos.Y-w);
+      with FActiveCanvas do MoveTo(PenPos.X, PenPos.Y - w);
   end;
 end;
 
 procedure OutTextXY(x, y: integer; s: string);
 var
   R: TRect;
-  oldbrush: TBrushStyle;
+  savedBrushStyle: TBrushStyle;
   w, h: integer;
 begin
   CheckCanvas;
-  oldBrush := _ActiveCanvas.Brush.Style;
+  savedBrushStyle := FActiveCanvas.Brush.Style;
   try
-    _ActiveCanvas.Brush.Style := bsClear;
+    FActiveCanvas.Brush.Style := bsClear;
     w := TextWidth(s);
     h := TextHeight(s);
-    case _TextDir of
+    case FTextDir of
       HorizDir :
         begin
-          case _TextAlignHor of
+          case FTextAlignHor of
             LeftText   : ;
             CenterText : x := x - w div 2;
             RightText  : x := x - w;
           end;
-          case _TextAlignVert of
+          case FTextAlignVert of
             TopText    : ;
             CenterText : y := y - h div 2;
             BottomText : y := y - h;
           end;
-          with _Viewport do begin
-            if Clip=ClipOn then begin
+          with FViewport do
+          begin
+            if Clip=ClipOn then
+            begin
               R := Rect(x1, y1, x2, y2);
-              _ActiveCanvas.TextRect(R, x+x1, y+y1, s);
+              FActiveCanvas.TextRect(R, x+x1, y+y1, s);
             end else
-              _ActiveCanvas.TextOut(x+x1, y+y1, s);
+              FActiveCanvas.TextOut(x+x1, y+y1, s);
           end;
         end;  // HorizDir
       VertDir :
         begin
-          case _TextAlignHor of
+          case FTextAlignHor of
             LeftText   : ;
             CenterText : x := x - h div 2;
             RightText  : x := x - h;
           end;
-          case _TextAlignVert of
+          case FTextAlignVert of
             TopText    : y := y + w;
             CenterText : y := y + w div 2;
             BottomText : ;
           end;
-          _ActiveCanvas.Font.Orientation := 900;
+          FActiveCanvas.Font.Orientation := 900;
           try
-            with _ViewPort do
+            with FViewPort do
             begin
               if Clip = ClipOn then
               begin
                 R := Rect(x1, y1, x2, y2);
-                _ActiveCanvas.TextRect(R, x+x1, y+y1, s);
+                FActiveCanvas.TextRect(R, x+x1, y+y1, s);
               end else
-                _ActiveCanvas.TextOut(x+x1, y+y1, s);
+                FActiveCanvas.TextOut(x+x1, y+y1, s);
             end;
           finally
-            _ActiveCanvas.Font.Orientation := 0;
+            FActiveCanvas.Font.Orientation := 0;
           end;
-                    (*
-          // wp: Is this cross-platform???????? Why not font.Orientation = 900???
-
-          // Erzeugung des LogFonts lt. PC Magazin 11/98, Font-Handling
-          // lt Windows SDK-Hilfe "Rotating Lines of Text"
-          GetObject(_ActiveCanvas.Font.Handle, SizeOf(TLogFont), @LogFont);
-          LogFont.lfEscapement := 900;   // in Zehntel Grad!
-          hFnt := CreateFontIndirect(LogFont);
-          hFntPrev := SelectObject(_ActiveCanvas.Handle, hFnt);
-          with _Viewport do begin
-            if Clip=ClipOn then begin
-              R := Rect(x1, y1, x2, y2);
-              ExtTextOut(_ActiveCanvas.Handle, x+x1, y+y1, ETO_CLIPPED, @R,
-                PChar(s), Length(s), nil);
-            end else
-              TextOut(_ActiveCanvas.Handle, x+x1, y+y1, PChar(s), Length(s));
-          end;
-          SelectObject(_ActiveCanvas.Handle, hFntPrev);
-          DeleteObject(hFnt);
-          *)
         end;  // VertDir
     end;
   finally
-    _ActiveCanvas.Brush.Style := oldBrush;
+    FActiveCanvas.Brush.Style := savedBrushStyle;
   end;
 end;
 
@@ -1261,27 +1260,27 @@ begin
   Rsrc := Rect(0, 0, ABitmap.Width, ABitmap.Height);
   Rdest := Rect(x, y, x + ABitmap.Width, y + ABitmap.Height);
   case AMode of
-    NormalPut : _ActiveCanvas.CopyMode := cmSrcCopy;
-    XorPut    : _ActiveCanvas.CopyMode := cmPatInvert;
-    OrPut     : _ActiveCanvas.CopyMode := cmSrcPaint;
-    AndPut    : _ActiveCanvas.CopyMode := cmSrcAnd;
-    NotPut    : _ActiveCanvas.CopyMode := cmMergeCopy;
+    NormalPut : FActiveCanvas.CopyMode := cmSrcCopy;
+    XorPut    : FActiveCanvas.CopyMode := cmPatInvert;
+    OrPut     : FActiveCanvas.CopyMode := cmSrcPaint;
+    AndPut    : FActiveCanvas.CopyMode := cmSrcAnd;
+    NotPut    : FActiveCanvas.CopyMode := cmMergeCopy;
   end;
   { The LCL canvas has many options for CopyMode (TCanvas.CopyMode).
     Possibly this is not 100% correct here... }
-  _ActiveCanvas.CopyRect(Rdest, ABitmap.Canvas, Rsrc);
+  FActiveCanvas.CopyRect(Rdest, ABitmap.Canvas, Rsrc);
 end;
 
 procedure PutPixel(x, y: integer; AColor: word);
 begin
   CheckCanvas;
   GlobalPoint(x, y);
-  _ActiveCanvas.Pixels[x,y] := VGAColors[AColor];
+  FActiveCanvas.Pixels[x,y] := VGAColors[AColor];
 end;
 
 procedure Rectangle(x1, y1, x2, y2: integer);
 var
-  brushstyle: TBrushStyle;
+  savedBrushStyle: TBrushStyle;
 begin
   CheckCanvas;
   inc(x2);    // LCL ignores the lower right edge.
@@ -1289,11 +1288,14 @@ begin
   GlobalPoint(x1, y1);
   GlobalPoint(x2, y2);
   CheckCorners(x1,y1, x2,y2);
-  with _ActiveCanvas do begin
-    brushstyle := Brush.Style;
-    Brush.Style := bsClear;
-    Rectangle(x1, y1, x2, y2);
-    Brush.Style := brushstyle;
+  with FActiveCanvas do begin
+    savedBrushStyle := Brush.Style;
+    try
+      Brush.Style := bsClear;
+      Rectangle(x1, y1, x2, y2);
+    finally
+      Brush.Style := savedBrushStyle;
+    end;
   end;
 end;
 
@@ -1314,9 +1316,10 @@ end;
 procedure Sector(x, y: integer; StAngle, EndAngle, xRadius, yRadius: word);
 var
   x1,y1, x2,y2, x3,y3, x4,y4 : integer;
-  phi : double;
+  sinPhi, cosPhi: Double;
 begin
   CheckCanvas;
+
   x1 := x - xRadius;
   y1 := y - yRadius;
   GlobalPoint(x1,y1);
@@ -1325,22 +1328,21 @@ begin
   y2 := y + yRadius;
   GlobalPoint(x2,y2);
 
-  phi := degToRad(StAngle);
-  x3 := x + Round(xRadius*cos(phi));
-  y3 := y - round(yRadius*sin(phi));
+  SinCos(DegToRad(StAngle), sinPhi, cosPhi);
+  x3 := x + Round(xRadius * cosPhi);
+  y3 := y - round(yRadius * sinPhi);
   GlobalPoint(x3,y3);
 
-  phi := DegToRad(EndAngle);
-  x4 := x + round(xRadius*cos(phi));
-  y4 := y - round(yRadius*sin(phi));
+  SinCos(DegToRad(EndAngle), sinPhi, cosPhi);
+  x4 := x + round(xRadius * cosPhi);
+  y4 := y - round(yRadius * sinPhi);
   GlobalPoint(x4, y4);
 
-  _ActiveCanvas.Pie(x1,y1, x2,y2, x3,y3, x4,y4);
+  FActiveCanvas.Pie(x1,y1, x2,y2, x3,y3, x4,y4);
 end;
 
 procedure SetBkColor(AColorNum: word);
 begin
-  CheckCanvas;
   UseAsBkColor(PaletteToColor(AColorNum));
 end;
 
@@ -1350,22 +1352,19 @@ end;
   use SetFgColor as a replacement. }
 procedure SetColor(AColor: word);
 begin
-  CheckCanvas;
-  UseAsColor(PaletteToColor(AColor));
+  UseAsFgColor(PaletteToColor(AColor));
 end;
 
 { Replacement for SetColor which cannot be called in the context of a TControl }
 procedure SetFgColor(AColor: word);
 begin
-  CheckCanvas;
-  UseAsColor(PaletteToColor(AColor));
+  UseAsFgColor(PaletteToColor(AColor));
 end;
 
 procedure SetFillPattern(APattern: FillPatternType; AColor: word);
 begin
   CheckCanvas;
   User_Fill := APattern;
-//  Move(APattern, User_Fill, SizeOf(APattern));
   SetFillStyle(UserFill, AColor);
 end;
 
@@ -1382,40 +1381,40 @@ begin
   if (APattern > UserFill) then
     InvalidPatternError;
 
-  _FillBitmap.Free;
+  FreeAndNil(FFillBitmap);
+
   case APattern of
     EmptyFill :
-      with _ActiveCanvas do begin
-        _FillBitmap := nil;
+      with FActiveCanvas do begin
         Brush.Bitmap := nil;
         Brush.Style := bsClear;
       end;
     SolidFill :
-      with _ActiveCanvas do begin
-        _FillBitmap := nil;
+      with FActiveCanvas do begin
         Brush.BitMap := nil;
         Brush.Style := bsSolid;
         Brush.Color := PaletteToColor(AColor);
       end;
     else begin
-      patt := _FillPatterns[APattern]^;
-      _FillBitmap := TBitmap.Create;
+      patt := FILL_PATTERNS[APattern]^;
+      FFillBitmap := TBitmap.Create;
       col := PaletteToColor(AColor);
-      _FillBitmap.Width := 8;
-      _FillBitmap.Height := 8;
+      FFillBitmap.Width := 8;
+      FFillBitmap.Height := 8;
       for i := 1 to 8 do begin
         y := i-1;
-        for j:=0 to 7 do begin
+        for j := 0 to 7 do begin
           x := j;
-          if patt[i] and Bits[j] <> 0
-            then _FillBitmap.Canvas.Pixels[x,y] := col
-            else _FillBitmap.Canvas.Pixels[x,y] := _RGB_BkColor;
+          if patt[i] and Bits[j] <> 0 then
+            FFillBitmap.Canvas.Pixels[x,y] := col
+          else
+            FFillBitmap.Canvas.Pixels[x,y] := FBkColorRGB;
         end;
       end;
     end;
-    _FillSettings.Pattern := APattern;
-    _FillSettings.Color := AColor;
-    _ActiveCanvas.Brush.Bitmap := _FillBitmap;
+    FFillSettings.Pattern := APattern;
+    FFillSettings.Color := AColor;
+    FActiveCanvas.Brush.Bitmap := FFillBitmap;
   end;
 end;
 
@@ -1425,7 +1424,7 @@ end;
 procedure SetLineStyle(ALineStyle, APattern, AThickness: word);
 begin
   CheckCanvas;
-  with _ActiveCanvas.Pen do begin
+  with FActiveCanvas.Pen do begin
     Style := PenStyle(ALineStyle);
     Width := AThickness;
   end;
@@ -1436,13 +1435,13 @@ var
   ts: TTextStyle;
 begin
   CheckCanvas;
-  _TextAlignHor := Horiz;
-  _TextAlignVert := Vert;
-  ts := _ActiveCanvas.TextStyle;
+  FTextAlignHor := Horiz;
+  FTextAlignVert := Vert;
+
+  ts := FActiveCanvas.TextStyle;
   ts.Alignment := taLeftJustify;
   ts.Layout := tlTop;
-  _ActiveCanvas.TextStyle := ts;
-//  SetTextAlign(_ActiveCanvas.Handle, TA_LEFT+TA_TOP);
+  FActiveCanvas.TextStyle := ts;
 end;
 
 { There are more possibilities with using "SetTextFont" }
@@ -1457,15 +1456,15 @@ begin
   if ACharsize > 10 then
     ACharsize := 10;
 
-  if (AFont > _NumFonts) then
+  if (AFont > FNumFonts) then
     InvalidFontError;
 
-  _BgiFont := AFont;
-  _BgiSize := ACharSize;
-  _TextDir := ADirection;
-  nam := _Fonts[AFont].Name;
-  siz := _Fonts[AFont].Sizes[ACharsize];
-  sty := _Fonts[AFont].Style;
+  FBgiFont := AFont;
+  FBgiSize := ACharSize;
+  FTextDir := ADirection;
+  nam := FFonts[AFont].Name;
+  siz := FFonts[AFont].Sizes[ACharsize];
+  sty := FFonts[AFont].Style;
   SetTextFont(nam, siz, sty);
 end;
 
@@ -1478,35 +1477,35 @@ procedure SetViewPort(x1, y1, x2, y2: integer; AClip: boolean);
 begin
   CheckCanvas;
   CheckCorners(x1,y1, x2,y2);
-  _viewport.x1 := x1;
-  _viewport.y1 := y1;
-  _viewport.x2 := x2;
-  _viewport.y2 := y2;
-  _viewport.Clip := AClip;
-  _ActiveCanvas.Clipping := AClip;
+  FViewport.x1 := x1;
+  FViewport.y1 := y1;
+  FViewport.x2 := x2;
+  FViewport.y2 := y2;
+  FViewport.Clip := AClip;
+  FActiveCanvas.Clipping := AClip;
   if AClip then
-    _ActiveCanvas.ClipRect := Rect(x1, y1, x2, y2);
+    FActiveCanvas.ClipRect := Rect(x1, y1, x2, y2);
 end;
 
 procedure SetWriteMode(AMode: integer);
 begin
   CheckCanvas;
   case AMode of
-    CopyPut : _ActiveCanvas.Pen.Mode := pmCopy;     // also: NormalPut
-    XorPut  : _ActiveCanvas.Pen.Mode := pmXor;
+    CopyPut : FActiveCanvas.Pen.Mode := pmCopy;     // also: NormalPut
+    XorPut  : FActiveCanvas.Pen.Mode := pmXor;
   end;
 end;
 
 function TextHeight(s: string): integer;
 begin
   CheckCanvas;
-  Result := _ActiveCanvas.TextHeight(s);
+  Result := FActiveCanvas.TextHeight(s);
 end;
 
 function TextWidth(s: string): integer;
 begin
   CheckCanvas;
-  Result := _ActiveCanvas.TextWidth(s);
+  Result := FActiveCanvas.TextWidth(s);
 end;
 
 
@@ -1514,73 +1513,34 @@ end;
 //                        Additional routines
 //==============================================================================
 
-{ All subsequent BGI graphics commands are buffered by means of a bitmap in
-  memory. An already visible graphic is also copied to the buffer. }
-procedure DrawToBuffer;
-var
-  R : TRect;
-begin
-  CheckCanvas;
-  R := _CanvasRect;
-  _BgiBuffer.Free;
-  _BgiBuffer := TBitmap.Create;
-  with _BgiBuffer do begin
-    Width := R.Right - R.Left;
-    Height := R.Bottom - R.Top;
-  end;
-  _BgiBuffer.Canvas.CopyRect(R, _Canvas, R);
-  _IsBuffered := true;
-end;
-
-{ All subsequent BGI graphics commands are displayed on the screen.
-  Undos a previously called "DrawToBuffer". }
-procedure DrawToScreen;
-begin
-  CheckCanvas;
-  _IsBuffered := false;
-end;
-
-{ Displays on the screen the internal bitmap buffer which had been used for
-  painting since the last call of "DrawToBuffer" }
-procedure ShowBuffer;
-var
-  Rsrc, Rdest: TRect;
-begin
-  CheckCanvas;
-  CheckBitmap(_BgiBuffer);
-  Rsrc := Rect(0, 0, _BgiBuffer.Width, _BgiBuffer.Height);
-  Rdest := _CanvasRect;
-  _Canvas.CopyRect(Rdest, _BgiBuffer.Canvas, Rsrc);
-end;
-
-function GetCanvas: TCanvas;
-begin
-  result := _ActiveCanvas;
-end;
-
 { Returns the current background color as RGB value.
   See also GetBkColor. }
-function GetRGBBkColor: TColor;
+function GetBkColorRGB: TColor;
 begin
   CheckCanvas;
-  Result := _ActiveCanvas.Brush.Color;
+  Result := FActiveCanvas.Brush.Color;
 end;
 
 { Returns the current foreground painting color as RGB value.
-  See also GetColor. }
-function GetRGBColor: TColor;
+  See also GetColor and GetFgColor. }
+function GetColorRGB: TColor;
 begin
   CheckCanvas;
-  Result := _ActiveCanvas.Pen.Color;
+  Result := FActiveCanvas.Pen.Color;
+end;
+
+function GetDefaultBkColorRGB: TColor;
+begin
+  Result := FDefaultColorRGB;
 end;
 
 { See SetTextFont. }
 procedure GetTextFont(out AFontName: TFontName; out ASize: integer;
   out AStyle: TFontStyles);
 begin
-  AFontName := _FontName;
-  ASize := _FontSize;
-  AStyle := _FontStyle;
+  AFontName := FFontName;
+  ASize := FFontSize;
+  AStyle := FFontStyle;
 end;
 
 procedure GradientRect(x1, y1, x2, y2:integer; StartColor, EndColor:TColor;
@@ -1592,94 +1552,30 @@ begin
     HorizDir: dir := gdHorizontal;
     VertDir: dir := gdVertical;
   end;
-  _ActiveCanvas.GradientFill(Rect(x1, y1, x2, y2), StartColor, EndColor, dir);
-end;
-{
-  function CalcColor(mincol,maxcol:byte; value,maxvalue:integer) : integer;
-  begin
-    result := integer(mincol) + round(value*(maxcol-mincol)/maxvalue);
-  end;
-
-var
-  i,n,m : integer;
-  r,g,b : integer;
-  color : TColor;
-  oldCol : TColor;
-begin
-  CheckCanvas;
-  CheckCorners(x1,y1,x2,y2);
-  GlobalPoint(x1, y1);
-  GlobalPoint(x2, y2);
-  case direction of
-    HorizDir : begin n := x2-x1; m := y2-y1; end;
-    VertDir  : begin n := y2-y1; m := x2-x1; end;
-  end;
-  oldcol := _ActiveCanvas.Pen.Color;
-  try
-    for i:= 0 to n-1 do begin
-      r := CalcColor(StartColor, EndColor, i, n);
-      g := CalcColor(StartColor shr 8, EndColor shr 8, i, n);
-      b := CalcColor(StartColor shr 16, EndColor shr 16, i, n);
-      Color := r + g shl 8 + b shl 16;
-      with _ActiveCanvas do begin
-        Pen.Color := color;
-        case direction of
-          HorizDir :
-            begin
-              MoveTo(x1+i, y1);
-              LineTo(x1+i, y2);
-            end;
-          VertDir :
-            begin
-              MoveTo(x1, y1+i);
-              LineTo(x2, y1+i);
-            end;
-        end;
-      end;
-    end;
-  finally
-    _ActiveCanvas.Pen.Color := oldCol;
-  end;
-end;
-}
-
-//------------------------------------------------------------------------------
-
-procedure SetBgiControl(AControl: TControl);
-begin                    
-  if AControl is TGraphicControl then
-    _Canvas := TBgiGraphicControl(AControl).Canvas
-  else
-  if AControl is TCustomControl then
-    _Canvas := TBgiCustomControl(AControl).Canvas
-  else if AControl is TCustomForm then
-    _Canvas := TCustomForm(AControl).Canvas
-  else
-    raise EGraphError.Create(SInvalidAncestor);
-
-  if Assigned(_Canvas) then begin
-    _CanvasRect := AControl.ClientRect;            // Größe des Zeichenbreichs
-    if AControl is TCustomForm then
-      _ClipOrigin := Point(0, 0)
-    else
-    _ClipOrigin := Point(AControl.Left, AControl.Top);
-  end;
+  FActiveCanvas.GradientFill(Rect(x1, y1, x2, y2), StartColor, EndColor, dir);
 end;
 
 { Set background color as RGB value.
   See also: SetBkColor
   Can be called BEFORE InitGraph. }
-procedure SetRGBBkColor(AColor: TColor);
+procedure SetBkColorRGB(AColor: TColor);
 begin
-  _RGB_BkColor := AColor;
+  UseAsBkColor(AColor);
+  FBkColorRGB := AColor;
 end;
 
 { Set line and text color as RGB value.
   See also: SetColor
   Can be called BEFORE InitGraph. }
-procedure SetRGBColor(AColor:TColor);
+procedure SetColorRGB(AColor:TColor);
 begin
-  _RGB_Color := AColor;
+  UseAsFgColor(AColor);
+end;
+
+{ Defines the background rgb color used by GraphDefaults }
+procedure SetDefaultBkColorRGB(AColor: TColor);
+begin
+  FDefaultBkColorRGB := AColor;
 end;
 
 { Defines the default font for text output:
@@ -1710,7 +1606,7 @@ end;
 procedure SetFillBitmap(ABitmap: TCustomBitmap);
 begin
   CheckCanvas;
-  _ActiveCanvas.Brush.Bitmap := ABitmap;
+  FActiveCanvas.Brush.Bitmap := ABitmap;
 end;
 
 { Defines the SansSerifFont for text output }
@@ -1732,17 +1628,18 @@ end;
   - ASize: font size in points
   - AStyle: Set of style attributes, fsBold, fsItalic, fsUnderLine, fsStrikeOut,
     normally empty []
-  When the font doe not exist it is replaced by a similar one. No error message. }
+  When the font does not exist it is replaced by a similar one. No error message. }
 procedure SetTextFont(AFontName: TFontName; ASize: integer; AStyle: TFontStyles);
 begin
-  _FontName := AFontName;
-  _FontSize := ASize;
-  _FontStyle := AStyle;
-  if Assigned(_ActiveCanvas) then
-    with _ActiveCanvas.Font do begin
-      Name := _FontName;
-      Size := _FontSize;
-      Style := _FontStyle;
+  FFontName := AFontName;
+  FFontSize := ASize;
+  FFontStyle := AStyle;
+  if Assigned(FActiveCanvas) then
+    with FActiveCanvas.Font do
+    begin
+      Name := FFontName;
+      Size := FFontSize;
+      Style := FFontStyle;
     end;
 end;
 
@@ -1755,13 +1652,11 @@ end;
 
 
 initialization
-  _Canvas := nil;
-  _ClipOrigin := Point(0, 0);
-  _RGB_Color := clWhite;
-  _RGB_BkColor := clBlack;
-  _FillBitmap := nil;
-  _BgiBuffer := nil;
-  _IsBuffered := false;
+  FDefaultBkColorRGB := clBlack;
+  FDefaultColorRGB := clWhite;
+  FBkColorRGB := clBlack;
+  FFgColorRGB := clWhite;
+  FFillBitmap := nil;
   InitFonts;
 
 finalization

@@ -169,7 +169,7 @@ const
 var
   i : integer;
 begin
-  InitGraph(Paintbox);
+  InitGraph(Paintbox.Canvas, Paintbox.Width, Paintbox.Height);
   SetFgColor(Black);
 
   SetFillStyle(SolidFill, RedParticleColor);
@@ -191,7 +191,7 @@ var
   j: integer;
   maxY: integer;
 begin
-  InitGraph(Plot);
+  InitGraph(Plot.Canvas, Plot.Width, Plot.Height);
   SetLineStyle(SolidLn, 0, NormWidth);
   SetFgColor(Black);
 

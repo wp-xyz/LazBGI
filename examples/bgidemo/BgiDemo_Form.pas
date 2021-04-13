@@ -32,6 +32,7 @@ type
     Label2: TLabel;
     OwnDemoList: TListBox;
     BorlandDemoList: TListBox;
+    Splitter2: TSplitter;
     procedure BorlandPaintBoxPaint(Sender: TObject);
     procedure BtnQuitClick(Sender: TObject);
     procedure BorlandDemoListClick(Sender: TObject);
@@ -67,7 +68,7 @@ begin
     Exit;
   end;
 
-  InitGraph(BorlandPaintBox);
+  InitGraph(BorlandPaintBox.Canvas, BorlandPaintbox.Width, BorlandPaintbox.Height);
   Initialize;
   SetGothicFont('Old English Text MT', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
 
@@ -77,23 +78,21 @@ begin
     2    : BarPlay;
     3    : Bar3DPlay;
     4    : RandBarPlay;
-    5    : CirclePlay(false);
-    6    : CirclePlay(true);
-    7..11: TextDump(BorlandDemoList.ItemIndex - 7);
-    12   : LinetoPlay;
-    13   : LineRelPlay;
-    14   : LineStylePlay;
-    15   : ColorPlay;
-    16   : PolyPlay(false);
-    17   : PolyPlay(true);
-    18   : FillStylePlay;
-    19   : FillPatternPlay;
-    20   : PutPixelPlay;
-    21   : ArcPlay;
-    22   : FillEllipsePlay;
-    23   : SectorPlay;
-    24   : WriteModePlay;
-    25   : PiePlay;
+    5    : CirclePlay;
+    6..10: TextDump(BorlandDemoList.ItemIndex - 7);
+    11   : LinetoPlay;
+    12   : LineRelPlay;
+    13   : LineStylePlay;
+    14   : ColorPlay;
+    15   : PolyPlay;
+    16   : FillStylePlay;
+    17   : FillPatternPlay;
+    18   : PutPixelPlay;
+    19   : ArcPlay;
+    20   : FillEllipsePlay;
+    21   : SectorPlay;
+    22   : WriteModePlay;
+    23   : PiePlay;
   end;
 end;
 
@@ -150,9 +149,9 @@ end;
 procedure TMainForm.BtnBkColorClick(Sender: TObject);
 begin
   with ColorDialog do begin
-    Color := GetRGBBkColor;
+    Color := GetDefaultBkColorRGB;
     if Execute then begin
-      SetRGBBkColor(Color);
+      SetDefaultBkColorRGB(Color);
       RefreshPage;
     end;
   end;
@@ -160,7 +159,7 @@ end;
 
 procedure TMainForm.OwnPaintboxPaint(Sender: TObject);
 begin
-  InitGraph(OwnPaintBox);
+  InitGraph(OwnPaintBox.Canvas, OwnPaintBox.Width, OwnPaintBox.Height);
   Initialize;
   case OwnDemoList.ItemIndex of
     0   : FloodFillPlay;
