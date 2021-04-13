@@ -15,7 +15,7 @@ Introduction:
 - BGI commands must begin with "InitGraph". In contrast to BGI, the routine does
   not provide the graphics driver, but the canvas onto which the output is
   painted, e.g. "Paintbox1" or "Form1". The other two parameters define the
-  with and height of the drawing area:
+  width and height of the drawing area:
 
     InitGraph(Paintbox1.Canvas, Paintbox1.Width, Paintbox1.Height);
 
