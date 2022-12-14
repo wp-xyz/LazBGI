@@ -68,6 +68,7 @@ begin
     Exit;
   end;
 
+  BorlandPaintBox.Invalidate;
   InitGraph(BorlandPaintBox.Canvas, BorlandPaintbox.Width, BorlandPaintbox.Height);
   Initialize;
   SetGothicFont('Old English Text MT', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
@@ -159,6 +160,7 @@ end;
 
 procedure TMainForm.OwnPaintboxPaint(Sender: TObject);
 begin
+  OwnPaintBox.Invalidate;
   InitGraph(OwnPaintBox.Canvas, OwnPaintBox.Width, OwnPaintBox.Height);
   Initialize;
   case OwnDemoList.ItemIndex of
