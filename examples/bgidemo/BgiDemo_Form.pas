@@ -36,6 +36,7 @@ type
     procedure BorlandPaintBoxPaint(Sender: TObject);
     procedure BtnQuitClick(Sender: TObject);
     procedure BorlandDemoListClick(Sender: TObject);
+    procedure FormCreate(Sender: TObject);
     procedure FormShow(Sender: TObject);
     procedure FontBtnClick(Sender: TObject);
     procedure CharSetClick(Sender: TObject);
@@ -104,6 +105,14 @@ end;
 procedure TMainForm.BorlandDemoListClick(Sender: TObject);
 begin
   BorlandPaintBox.Invalidate;
+end;
+
+procedure TMainForm.FormCreate(Sender: TObject);
+begin
+  {$IFDEF DARWIN}
+  BorlandDemoList.ItemHeight := 18;
+  OwnDemoList.ItemHeight := 18;
+  {$ENDIF}
 end;
 
 procedure TMainForm.FormShow(Sender: TObject);

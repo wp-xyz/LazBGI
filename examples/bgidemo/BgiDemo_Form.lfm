@@ -8,6 +8,7 @@ object MainForm: TMainForm
   ClientWidth = 639
   Color = clBtnFace
   Font.Color = clWindowText
+  OnCreate = FormCreate
   OnShow = FormShow
   Position = poDefaultPosOnly
   LCLVersion = '2.3.0.0'

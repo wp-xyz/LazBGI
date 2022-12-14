@@ -655,7 +655,7 @@ const
   SMALLFONT_NAME = 'Liberation Sans';
   TRIPLEXFONT_NAME = 'Liberation Serif';
  {$ENDIF}
- {$IFDEF COCOA}
+ {$IFDEF DARWIN}
   DEFAULTFONT_NAME = 'Courier New';
   GOTHICFONT_NAME = 'Savoye LET';
   SANSSERIFFONT_NAME = 'Arial';

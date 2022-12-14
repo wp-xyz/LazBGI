@@ -40,7 +40,7 @@ var
 implementation
 
 uses
-  SysUtils, Graphics, LConvEncoding, lazBGI;
+  SysUtils, Graphics, LConvEncoding, Forms, lazBGI;
 
 var
   MaxX, MaxY : integer;
@@ -1225,7 +1225,7 @@ var
 begin
   MainWindow('FillBitmap Demonstration');
   GetViewSettings(ViewInfo);
-  fn := 'paw.png';
+  fn := Application.Location + 'paw.png';
   if not FileExists(fn) then
   begin
     GetViewSettings(viewInfo);
@@ -1235,7 +1235,7 @@ begin
       MoveTo(2, 3);
       SetTextStyle(DefaultFont, HorizDir, 1);
       OutText('Image file "' + fn + '" not found.');
-      {$IFDEF COCOA}
+      {$IFDEF DARWIN}
       MoveTo(2, 3 + TextHeight('Tg'));
       OutText('Copy it to the application bundle.');
       {$ENDIF}
