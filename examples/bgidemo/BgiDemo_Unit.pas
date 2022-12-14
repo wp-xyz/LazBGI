@@ -1219,14 +1219,32 @@ end; { FloodFillPlay }
 
 procedure FillBitmapPlay;
 var
-  viewInfo : ViewPortType;
-  img : TCustomBitmap;
+  viewInfo: ViewPortType;
+  img: TCustomBitmap;
+  fn: String;
 begin
   MainWindow('FillBitmap Demonstration');
   GetViewSettings(ViewInfo);
+  fn := 'paw.png';
+  if not FileExists(fn) then
+  begin
+    GetViewSettings(viewInfo);
+    with viewInfo do
+    begin
+      SetTextJustify(LeftText, TopText);
+      MoveTo(2, 3);
+      SetTextStyle(DefaultFont, HorizDir, 1);
+      OutText('Image file "' + fn + '" not found.');
+      {$IFDEF COCOA}
+      MoveTo(2, 3 + TextHeight('Tg'));
+      OutText('Copy it to the application bundle.');
+      {$ENDIF}
+      exit;
+    end;
+  end;
   img := TPortableNetworkGraphic.Create;
   try
-    img.LoadFromFile('paw.png');
+    img.LoadFromFile(fn);
     SetFillBitmap(img);
     Bar(10, 10, GetmaxX-10, GetMaxY-10);
     WaitToGo;

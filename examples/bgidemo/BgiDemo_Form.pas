@@ -70,7 +70,7 @@ begin
 
   InitGraph(BorlandPaintBox.Canvas, BorlandPaintbox.Width, BorlandPaintbox.Height);
   Initialize;
-  SetGothicFont('Old English Text MT', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
+//  SetGothicFont('Old English Text MT', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
 
   case BorlandDemoList.ItemIndex of
     0    : ReportStatus;
@@ -79,7 +79,7 @@ begin
     3    : Bar3DPlay;
     4    : RandBarPlay;
     5    : CirclePlay;
-    6..10: TextDump(BorlandDemoList.ItemIndex - 7);
+    6..10: TextDump(BorlandDemoList.ItemIndex - 6);
     11   : LinetoPlay;
     12   : LineRelPlay;
     13   : LineStylePlay;
@@ -103,7 +103,7 @@ end;
 
 procedure TMainForm.BorlandDemoListClick(Sender: TObject);
 begin
-  BorlandPaintBoxPaint(Sender);
+  BorlandPaintBox.Invalidate;
 end;
 
 procedure TMainForm.FormShow(Sender: TObject);
@@ -162,10 +162,10 @@ begin
   InitGraph(OwnPaintBox.Canvas, OwnPaintBox.Width, OwnPaintBox.Height);
   Initialize;
   case OwnDemoList.ItemIndex of
-    0   : FloodFillPlay;
-    1   : FillBitmapPlay;
-    2   : GradientDemo;
-    3   : UserFontDemo;
+    0: FloodFillPlay;
+    1: FillBitmapPlay;
+    2: GradientDemo;
+    3: UserFontDemo;
   end;
   CloseGraph;
 end;
@@ -177,15 +177,15 @@ end;
 
 procedure TMainForm.Refreshpage;
 begin
-  if PageControl.ActivePage = BorlandDemosSheet
-    then BorlandPaintboxPaint(Self)
-  else if PageControl.ActivePage = OwnDemosSheet
-    then OwnPaintboxPaint(self);
+  if PageControl.ActivePage = BorlandDemosSheet then
+    BorlandPaintbox.Invalidate
+  else if PageControl.ActivePage = OwnDemosSheet then
+    OwnPaintbox.Invalidate;
 end;
 
 procedure TMainForm.OwnDemoListClick(Sender: TObject);
 begin
-  OwnPaintBoxPaint(Sender);
+  OwnPaintBox.Invalidate;
 end;
 
 procedure TMainForm.BufferedCheckboxClick(Sender: TObject);

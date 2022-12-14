@@ -640,14 +640,36 @@ end;
 
 { Initializes the _Fonts array }
 procedure InitFonts;
+const
+ {$IFDEF MSWINDOWS}
+  DEFAULTFONT_NAME = 'Courier New';
+  GOTHICFONT_NAME = 'Allegro BT';
+  SANSSERIFFONT_NAME = 'Arial';
+  SMALLFONT_NAME = 'Arial Narrow';
+  TRIPLEXFONT_NAME = 'Times New Roman';
+ {$ENDIF}
+ {$IFDEF LINUX}
+  DEFAULTFONT_NAME = 'Liberation Mono';
+  GOTHICFONT_NAME = 'Allegro BT';
+  SANSSERIFFONT_NAME = 'Liberation Sans';
+  SMALLFONT_NAME = 'Liberation Sans';
+  TRIPLEXFONT_NAME = 'Liberation Serif';
+ {$ENDIF}
+ {$IFDEF COCOA}
+  DEFAULTFONT_NAME = 'Courier New';
+  GOTHICFONT_NAME = 'Savoye LET';
+  SANSSERIFFONT_NAME = 'Arial';
+  SMALLFONT_NAME = 'Arial Narrow';
+  TRIPLEXFONT_NAME = 'Times New Roman';
+ {$ENDIF}
 var
   i: integer;
 begin
-  SetDefaultFont('Courier New', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
-  SetGothicFont('Allegro BT', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
-  SetSansserifFont('Arial', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
-  SetSmallFont('Arial Narrow', [6, 7, 8, 10, 12, 14, 16, 20, 24, 32], []);
-  SetTriplexFont('Times New Roman', [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
+  SetDefaultFont(DEFAULTFONT_NAME, [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
+  SetGothicFont(GOTHICFONT_NAME, [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
+  SetSansserifFont(SANSSERIFFONT_NAME, [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
+  SetSmallFont(SMALLFONT_NAME, [6, 7, 8, 10, 12, 14, 16, 20, 24, 32], []);
+  SetTriplexFont(TRIPLEXFONT_NAME, [10, 12, 14, 16, 20, 24, 28, 32, 38, 48, 72], []);
   FNumFonts := 4;
   for i := FNumFonts+1 to 10 do begin
     with FFonts[i] do begin
